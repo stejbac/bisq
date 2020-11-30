@@ -20,16 +20,16 @@ package bisq.common.file;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Singleton
 public class CorruptedStorageFileHandler {
-    private final List<String> files = new ArrayList<>();
+    private final List<String> files = new CopyOnWriteArrayList<>();
 
     @Inject
     public CorruptedStorageFileHandler() {

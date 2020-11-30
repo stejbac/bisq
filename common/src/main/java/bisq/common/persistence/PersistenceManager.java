@@ -44,7 +44,6 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -54,7 +53,7 @@ import lombok.extern.slf4j.Slf4j;
 import javax.annotation.Nullable;
 
 import static bisq.common.util.Preconditions.checkDir;
-import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Preconditions.checkState;
 
 /**
  * Responsible for reading persisted data and writing it on disk. We read usually only at start-up and keep data in RAM.
@@ -80,48 +79,45 @@ public class PersistenceManager<T extends PersistableEnvelope> {
     // Static
     ///////////////////////////////////////////////////////////////////////////////////////////
 
-    public static final Map<String, PersistenceManager<?>> ALL_PERSISTENCE_MANAGERS = new HashMap<>();
-    public static boolean FLUSH_ALL_DATA_TO_DISK_CALLED = false;
+    private static final Map<String, PersistenceManager<?>> ALL_PERSISTENCE_MANAGERS = new HashMap<>();
+    private static volatile boolean flushAllDataToDiskCalled = false;
 
 
     // We require being called only once from the global shutdown routine. As the shutdown routine has a timeout
     // and error condition where we call the method as well beside the standard path and it could be that those
     // alternative code paths call our method after it was called already, so it is a valid but rare case.
     // We add a guard to prevent repeated calls.
-    public static void flushAllDataToDisk(ResultHandler completeHandler) {
-        // We don't know from which thread we are called so we map to user thread
-        UserThread.execute(() -> {
-            if (FLUSH_ALL_DATA_TO_DISK_CALLED) {
-                log.warn("We got flushAllDataToDisk called again. This can happen in some rare cases. We ignore the repeated call.");
-                return;
+    public static synchronized void flushAllDataToDisk(ResultHandler completeHandler) {
+        if (flushAllDataToDiskCalled) {
+            log.warn("We got flushAllDataToDisk called again. This can happen in some rare cases. We ignore the repeated call.");
+            return;
+        }
+
+        flushAllDataToDiskCalled = true;
+
+        log.info("Start flushAllDataToDisk at shutdown");
+        AtomicInteger openInstances = new AtomicInteger(ALL_PERSISTENCE_MANAGERS.size());
+
+        if (openInstances.get() == 0) {
+            log.info("No PersistenceManager instances have been created yet.");
+            UserThread.execute(completeHandler::handleResult);
+        }
+
+        var persistenceManagers = new HashSet<>(ALL_PERSISTENCE_MANAGERS.values());
+
+        UserThread.execute(() -> persistenceManagers.forEach(persistenceManager -> {
+            // For Priority.HIGH data we want to write to disk in any case to be on the safe side if we might have missed
+            // a requestPersistence call after an important state update. Those are usually rather small data stores.
+            // Otherwise we only persist if requestPersistence was called since the last persist call.
+            if (persistenceManager.source.flushAtShutDown || persistenceManager.persistenceRequested) {
+                // We always get our completeHandler called even if exceptions happen. In case a file write fails
+                // we still call our shutdown and count down routine as the completeHandler is triggered in any case.
+
+                persistenceManager.persistNow(() -> onWriteCompleted(completeHandler, openInstances, persistenceManager));
+            } else {
+                onWriteCompleted(completeHandler, openInstances, persistenceManager);
             }
-
-            FLUSH_ALL_DATA_TO_DISK_CALLED = true;
-
-            log.info("Start flushAllDataToDisk at shutdown");
-            AtomicInteger openInstances = new AtomicInteger(ALL_PERSISTENCE_MANAGERS.size());
-
-            if (openInstances.get() == 0) {
-                log.info("No PersistenceManager instances have been created yet.");
-                completeHandler.handleResult();
-            }
-
-            new HashSet<>(ALL_PERSISTENCE_MANAGERS.values()).forEach(persistenceManager -> {
-                // For Priority.HIGH data we want to write to disk in any case to be on the safe side if we might have missed
-                // a requestPersistence call after an important state update. Those are usually rather small data stores.
-                // Otherwise we only persist if requestPersistence was called since the last persist call.
-                if (persistenceManager.source.flushAtShutDown || persistenceManager.persistenceRequested) {
-                    // We always get our completeHandler called even if exceptions happen. In case a file write fails
-                    // we still call our shutdown and count down routine as the completeHandler is triggered in any case.
-
-                    // We get our result handler called from the write thread so we map back to user thread.
-                    persistenceManager.persistNow(() ->
-                            UserThread.execute(() -> onWriteCompleted(completeHandler, openInstances, persistenceManager)));
-                } else {
-                    onWriteCompleted(completeHandler, openInstances, persistenceManager);
-                }
-            });
-        });
+        }));
     }
 
     // We get called always from user thread here.
@@ -133,7 +129,6 @@ public class PersistenceManager<T extends PersistableEnvelope> {
             log.info("flushAllDataToDisk completed");
             completeHandler.handleResult();
         }
-
     }
 
 
@@ -183,7 +178,7 @@ public class PersistenceManager<T extends PersistableEnvelope> {
     @Nullable
     private Timer timer;
     private ExecutorService writeToDiskExecutor;
-    public final AtomicBoolean initCalled = new AtomicBoolean(false);
+    private boolean initCalled;
 
 
     ///////////////////////////////////////////////////////////////////////////////////////////
@@ -207,39 +202,48 @@ public class PersistenceManager<T extends PersistableEnvelope> {
         this.initialize(persistable, persistable.getDefaultStorageFileName(), source);
     }
 
-    public void initialize(T persistable, String fileName, Source source) {
-        if (FLUSH_ALL_DATA_TO_DISK_CALLED) {
-            log.warn("We have started the shut down routine already. We ignore that initialize call.");
-            return;
+    public synchronized void initialize(T persistable, String fileName, Source source) {
+        synchronized (PersistenceManager.class) {
+            if (flushAllDataToDiskCalled) {
+                log.warn("We have started the shut down routine already. We ignore that initialize call.");
+                return;
+            }
+
+            if (ALL_PERSISTENCE_MANAGERS.containsKey(fileName)) {
+                RuntimeException runtimeException = new RuntimeException("We must not create multiple " +
+                        "PersistenceManager instances for file " + fileName + ".");
+                // We want to get logged from where we have been called so lets print the stack trace.
+                runtimeException.printStackTrace();
+                throw runtimeException;
+            }
+
+            if (initCalled) {
+                RuntimeException runtimeException = new RuntimeException("We must not call initialize multiple times. " +
+                        "PersistenceManager for file: " + fileName + ".");
+                // We want to get logged from where we have been called so lets print the stack trace.
+                runtimeException.printStackTrace();
+                throw runtimeException;
+            }
+
+            initCalled = true;
+
+            this.persistable = persistable;
+            this.fileName = fileName;
+            this.source = source;
+            storageFile = new File(dir, fileName);
+            ALL_PERSISTENCE_MANAGERS.put(fileName, this);
         }
-
-        if (ALL_PERSISTENCE_MANAGERS.containsKey(fileName)) {
-            RuntimeException runtimeException = new RuntimeException("We must not create multiple " +
-                    "PersistenceManager instances for file " + fileName + ".");
-            // We want to get logged from where we have been called so lets print the stack trace.
-            runtimeException.printStackTrace();
-            throw runtimeException;
-        }
-
-        if (initCalled.get()) {
-            RuntimeException runtimeException = new RuntimeException("We must not call initialize multiple times. " +
-                    "PersistenceManager for file: " + fileName + ".");
-            // We want to get logged from where we have been called so lets print the stack trace.
-            runtimeException.printStackTrace();
-            throw runtimeException;
-        }
-
-        initCalled.set(true);
-
-        this.persistable = persistable;
-        this.fileName = fileName;
-        this.source = source;
-        storageFile = new File(dir, fileName);
-        ALL_PERSISTENCE_MANAGERS.put(fileName, this);
     }
 
-    public void shutdown() {
-        ALL_PERSISTENCE_MANAGERS.remove(fileName);
+    private synchronized void checkInitialized() {
+        checkState(initCalled, "PersistenceManager instance is uninitialized.");
+    }
+
+    public synchronized void shutdown() {
+        checkInitialized();
+        synchronized (PersistenceManager.class) {
+            ALL_PERSISTENCE_MANAGERS.remove(fileName);
+        }
 
         if (timer != null) {
             timer.stop();
@@ -262,7 +266,8 @@ public class PersistenceManager<T extends PersistableEnvelope> {
      * @param orElse            Called if no file exists or reading of file failed.
      */
     public void readPersisted(Consumer<T> resultHandler, Runnable orElse) {
-        readPersisted(checkNotNull(fileName), resultHandler, orElse);
+        checkInitialized();
+        readPersisted(fileName, resultHandler, orElse);
     }
 
     /**
@@ -274,7 +279,7 @@ public class PersistenceManager<T extends PersistableEnvelope> {
      * @param orElse            Called if no file exists or reading of file failed.
      */
     public void readPersisted(String fileName, Consumer<T> resultHandler, Runnable orElse) {
-        if (FLUSH_ALL_DATA_TO_DISK_CALLED) {
+        if (flushAllDataToDiskCalled) {
             log.warn("We have started the shut down routine already. We ignore that readPersisted call.");
             return;
         }
@@ -293,23 +298,24 @@ public class PersistenceManager<T extends PersistableEnvelope> {
     // Currently used by tests and monitor. Should be converted to the threaded API as well.
     @Nullable
     public T getPersisted() {
-        return getPersisted(checkNotNull(fileName));
+        checkInitialized();
+        return getPersisted(fileName);
     }
 
     @Nullable
     public T getPersisted(String fileName) {
-        if (FLUSH_ALL_DATA_TO_DISK_CALLED) {
+        if (flushAllDataToDiskCalled) {
             log.warn("We have started the shut down routine already. We ignore that getPersisted call.");
             return null;
         }
 
         File storageFile = new File(dir, fileName);
-        if (!storageFile.exists()) {
-            return null;
-        }
 
         long ts = System.currentTimeMillis();
-        try (FileInputStream fileInputStream = new FileInputStream(storageFile)) {
+        try (FileInputStream fileInputStream = FileUtil.tryOpenInputStream(storageFile)) {
+            if (fileInputStream == null) {
+                return null;
+            }
             protobuf.PersistableEnvelope proto = protobuf.PersistableEnvelope.parseDelimitedFrom(fileInputStream);
             //noinspection unchecked
             T persistableEnvelope = (T) persistenceProtoResolver.fromProto(proto);
@@ -338,8 +344,8 @@ public class PersistenceManager<T extends PersistableEnvelope> {
     // Write file to disk
     ///////////////////////////////////////////////////////////////////////////////////////////
 
-    public void requestPersistence() {
-        if (FLUSH_ALL_DATA_TO_DISK_CALLED) {
+    public synchronized void requestPersistence() {
+        if (flushAllDataToDiskCalled) {
             log.warn("We have started the shut down routine already. We ignore that requestPersistence call.");
             return;
         }
@@ -350,13 +356,16 @@ public class PersistenceManager<T extends PersistableEnvelope> {
         // can be rather long.
         if (timer == null) {
             timer = UserThread.runAfter(() -> {
+                synchronized (this) {
+                    timer = null;
+                }
                 persistNow(null);
-                UserThread.execute(() -> timer = null);
             }, source.delay, TimeUnit.MILLISECONDS);
         }
     }
 
     public void persistNow(@Nullable Runnable completeHandler) {
+        checkInitialized();
         long ts = System.currentTimeMillis();
         try {
             // The serialisation is done on the user thread to avoid threading issue with potential mutations of the
@@ -376,7 +385,8 @@ public class PersistenceManager<T extends PersistableEnvelope> {
         }
     }
 
-    public void writeToDisk(protobuf.PersistableEnvelope serialized, @Nullable Runnable completeHandler) {
+    private void writeToDisk(protobuf.PersistableEnvelope serialized, @Nullable Runnable completeHandler) {
+        checkInitialized();
         long ts = System.currentTimeMillis();
         File tempFile = null;
         FileOutputStream fileOutputStream = null;
@@ -438,7 +448,7 @@ public class PersistenceManager<T extends PersistableEnvelope> {
         }
     }
 
-    private ExecutorService getWriteToDiskExecutor() {
+    private synchronized ExecutorService getWriteToDiskExecutor() {
         if (writeToDiskExecutor == null) {
             String name = "Write-" + fileName + "_to-disk";
             writeToDiskExecutor = Utilities.getSingleThreadExecutor(name);

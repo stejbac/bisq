@@ -20,6 +20,7 @@ package bisq.common.file;
 import bisq.common.util.Utilities;
 
 import com.google.common.io.Files;
+import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
@@ -28,6 +29,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -36,6 +39,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -43,6 +47,10 @@ import javax.annotation.Nullable;
 
 @Slf4j
 public class FileUtil {
+    // To rename over files on Windows, the overwritten file must be deleted in a separate step. Use
+    // a monitor to make this atomic, that is, prevent other threads from observing a missing file:
+    private static final Object windowsFileOverwriteMonitor = new Object();
+
     public static void rollingBackup(File dir, String fileName, int numMaxBackupFiles) {
         if (dir.exists()) {
             File backupDir = new File(Paths.get(dir.getAbsolutePath(), "backup").toString());
@@ -129,14 +137,15 @@ public class FileUtil {
         deleteFileIfExists(file, true);
     }
 
-    public static void deleteFileIfExists(File file, boolean ignoreLockedFiles) throws IOException {
+    private static void deleteFileIfExists(File file, boolean ignoreLockedFiles) throws IOException {
         try {
             if (Utilities.isWindows())
                 file = file.getCanonicalFile();
 
             if (file.exists() && !file.delete()) {
                 if (ignoreLockedFiles) {
-                    // We check if file is locked. On Windows all open files are locked by the OS, so we
+                    // We check if file is locked. On Windows, open files are typically locked by the OS
+                    // (though not when opened in Java by default: see https://stackoverflow.com/q/31606978).
                     if (isFileLocked(file))
                         log.info("Failed to delete locked file: " + file.getAbsolutePath());
                 } else {
@@ -170,16 +179,46 @@ public class FileUtil {
 
     public static void renameFile(File oldFile, File newFile) throws IOException {
         if (Utilities.isWindows()) {
-            // Work around an issue on Windows whereby you can't rename over existing files.
-            final File canonical = newFile.getCanonicalFile();
-            if (canonical.exists() && !canonical.delete()) {
-                throw new IOException("Failed to delete canonical file for replacement with save");
-            }
-            if (!oldFile.renameTo(canonical)) {
-                throw new IOException("Failed to rename " + oldFile + " to " + canonical);
+            synchronized (windowsFileOverwriteMonitor) {
+                // Work around an issue on Windows whereby you can't rename over existing files.
+                File canonical = newFile.getCanonicalFile();
+                if (canonical.exists() && !canonical.delete()) {
+                    throw new IOException("Failed to delete canonical file for replacement with save");
+                }
+                // Check every 100 ms for 30 s for the file to disappear from the directory listing, since on Windows
+                // a file can be deleted but its name remains in use until the last handle to its contents is closed.
+                // See https://stackoverflow.com/q/31606978 for more information.
+                for (int i = 0; i < 300; i++) {
+                    String[] dirListing = canonical.getParentFile().list();
+                    if (dirListing == null) {
+                        throw new IOException("Could not determine if canonical filename has been removed yet");
+                    }
+                    if (Arrays.stream(dirListing).noneMatch(canonical.getName()::equals)) {
+                        break;
+                    }
+                    Uninterruptibles.sleepUninterruptibly(100, TimeUnit.MILLISECONDS);
+                }
+                if (!oldFile.renameTo(canonical)) {
+                    throw new IOException("Failed to rename " + oldFile + " to " + canonical);
+                }
             }
         } else if (!oldFile.renameTo(newFile)) {
             throw new IOException("Failed to rename " + oldFile + " to " + newFile);
+        }
+    }
+
+    @Nullable
+    public static FileInputStream tryOpenInputStream(File file) {
+        try {
+            if (Utilities.isWindows()) {
+                synchronized (windowsFileOverwriteMonitor) {
+                    return new FileInputStream(file);
+                }
+            } else {
+                return new FileInputStream(file);
+            }
+        } catch (FileNotFoundException e) {
+            return null;
         }
     }
 
