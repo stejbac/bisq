@@ -455,7 +455,7 @@ public class DaoStateService implements DaoSetupService {
                 .collect(Collectors.toSet());
     }
 
-    // Any tx with burned BSQ
+    // Any valid tx with burned BSQ
     public Set<Tx> getBurntFeeTxs() {
         return getUnorderedTxStream()
                 .filter(tx -> tx.getBurntFee() > 0)

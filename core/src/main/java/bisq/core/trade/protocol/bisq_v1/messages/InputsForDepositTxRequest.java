@@ -88,6 +88,8 @@ public final class InputsForDepositTxRequest extends TradeMessage implements Dir
     private final String takersWarningTxFeeBumpAddress;
     @Nullable
     private final String takersRedirectTxFeeBumpAddress;
+    @Nullable
+    private final byte[] makersRedirectTxTakerSignatureRComponent;
 
     public InputsForDepositTxRequest(String tradeId,
                                      NodeAddress senderNodeAddress,
@@ -119,7 +121,8 @@ public final class InputsForDepositTxRequest extends TradeMessage implements Dir
                                      @Nullable String takersPaymentMethodId,
                                      int burningManSelectionHeight,
                                      @Nullable String takersWarningTxFeeBumpAddress,
-                                     @Nullable String takersRedirectTxFeeBumpAddress) {
+                                     @Nullable String takersRedirectTxFeeBumpAddress,
+                                     @Nullable byte[] makersRedirectTxTakerSignatureRComponent) {
         super(messageVersion, tradeId, uid);
         this.senderNodeAddress = senderNodeAddress;
         this.tradeAmount = tradeAmount;
@@ -149,6 +152,7 @@ public final class InputsForDepositTxRequest extends TradeMessage implements Dir
         this.burningManSelectionHeight = burningManSelectionHeight;
         this.takersWarningTxFeeBumpAddress = takersWarningTxFeeBumpAddress;
         this.takersRedirectTxFeeBumpAddress = takersRedirectTxFeeBumpAddress;
+        this.makersRedirectTxTakerSignatureRComponent = makersRedirectTxTakerSignatureRComponent;
     }
 
 
@@ -194,6 +198,7 @@ public final class InputsForDepositTxRequest extends TradeMessage implements Dir
         Optional.ofNullable(takersPaymentMethodId).ifPresent(builder::setTakersPayoutMethodId);
         Optional.ofNullable(takersWarningTxFeeBumpAddress).ifPresent(builder::setTakersWarningTxFeeBumpAddress);
         Optional.ofNullable(takersRedirectTxFeeBumpAddress).ifPresent(builder::setTakersRedirectTxFeeBumpAddress);
+        Optional.ofNullable(makersRedirectTxTakerSignatureRComponent).ifPresent(e -> builder.setMakersRedirectTxTakerSignatureRComponent(ByteString.copyFrom(e)));
         return getNetworkEnvelopeBuilder().setInputsForDepositTxRequest(builder).build();
     }
 
@@ -244,7 +249,8 @@ public final class InputsForDepositTxRequest extends TradeMessage implements Dir
                 ProtoUtil.stringOrNullFromProto(proto.getTakersPayoutMethodId()),
                 proto.getBurningManSelectionHeight(),
                 ProtoUtil.stringOrNullFromProto(proto.getTakersWarningTxFeeBumpAddress()),
-                ProtoUtil.stringOrNullFromProto(proto.getTakersRedirectTxFeeBumpAddress()));
+                ProtoUtil.stringOrNullFromProto(proto.getTakersRedirectTxFeeBumpAddress()),
+                ProtoUtil.byteArrayOrNullFromProto(proto.getMakersRedirectTxTakerSignatureRComponent()));
     }
 
     @Override
@@ -277,6 +283,7 @@ public final class InputsForDepositTxRequest extends TradeMessage implements Dir
                 ",\n     burningManSelectionHeight=" + burningManSelectionHeight +
                 ",\n     takersWarningTxFeeBumpAddress=" + takersWarningTxFeeBumpAddress +
                 ",\n     takersRedirectTxFeeBumpAddress=" + takersRedirectTxFeeBumpAddress +
+                ",\n     makersRedirectTxTakerSignatureRComponent=" + Utilities.bytesAsHexString(makersRedirectTxTakerSignatureRComponent) +
                 "\n} " + super.toString();
     }
 }

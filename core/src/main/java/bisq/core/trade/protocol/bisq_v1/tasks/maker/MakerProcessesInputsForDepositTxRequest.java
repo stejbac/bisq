@@ -34,6 +34,8 @@ import org.bitcoinj.core.Coin;
 
 import com.google.common.base.Charsets;
 
+import java.math.BigInteger;
+
 import java.util.Optional;
 
 import lombok.extern.slf4j.Slf4j;
@@ -84,7 +86,7 @@ public class MakerProcessesInputsForDepositTxRequest extends TradeTask {
 
             int makersBurningManSelectionHeight = processModel.getDelayedPayoutTxReceiverService().getBurningManSelectionHeight();
             checkArgument(takersBurningManSelectionHeight == makersBurningManSelectionHeight,
-                    "takersBurningManSelectionHeight does no match makersBurningManSelectionHeight");
+                    "takersBurningManSelectionHeight does not match makersBurningManSelectionHeight");
             processModel.setBurningManSelectionHeight(makersBurningManSelectionHeight);
 
             // We set the taker fee only in the processModel yet not in the trade as the tx was only created but not
@@ -127,6 +129,8 @@ public class MakerProcessesInputsForDepositTxRequest extends TradeTask {
 
             tradingPeer.setWarningTxFeeBumpAddress(request.getTakersWarningTxFeeBumpAddress());
             tradingPeer.setRedirectTxFeeBumpAddress(request.getTakersRedirectTxFeeBumpAddress());
+            tradingPeer.setPeersRedirectTxSignatureRComponent(Optional.ofNullable(request.getMakersRedirectTxTakerSignatureRComponent())
+                    .map(BigInteger::new).orElse(null));
 
             processModel.getTradeManager().requestPersistence();
 

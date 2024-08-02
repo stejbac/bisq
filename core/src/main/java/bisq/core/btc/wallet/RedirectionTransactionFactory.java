@@ -18,7 +18,7 @@
 package bisq.core.btc.wallet;
 
 import bisq.core.btc.exceptions.TransactionVerificationException;
-import bisq.core.crypto.LowRSigningKey;
+import bisq.core.crypto.RandomNonce;
 
 import bisq.common.util.Tuple2;
 
@@ -38,7 +38,14 @@ import org.bitcoinj.crypto.TransactionSignature;
 import org.bitcoinj.script.Script;
 import org.bitcoinj.script.ScriptBuilder;
 
+import org.bouncycastle.crypto.digests.SHA256Digest;
+import org.bouncycastle.crypto.params.ECPrivateKeyParameters;
 import org.bouncycastle.crypto.params.KeyParameter;
+import org.bouncycastle.crypto.signers.DSAKCalculator;
+import org.bouncycastle.crypto.signers.ECDSASigner;
+import org.bouncycastle.crypto.signers.HMacDSAKCalculator;
+
+import java.math.BigInteger;
 
 import java.util.List;
 
@@ -85,6 +92,7 @@ public class RedirectionTransactionFactory {
                                              byte[] buyerPubKey,
                                              byte[] sellerPubKey,
                                              DeterministicKey myMultiSigKeyPair,
+                                             @Nullable RandomNonce randomNonce,
                                              @Nullable KeyParameter aesKey)
             throws TransactionVerificationException {
 
@@ -96,10 +104,36 @@ public class RedirectionTransactionFactory {
         Sha256Hash sigHash = redirectionTx.hashForWitnessSignature(0, redeemScript,
                 redirectionTxInputValue, Transaction.SigHash.ALL, false);
 
-        ECKey.ECDSASignature mySignature = LowRSigningKey.from(myMultiSigKeyPair).sign(sigHash, aesKey);
+        ECKey.ECDSASignature mySignature = sign(myMultiSigKeyPair, sigHash, randomNonce, aesKey);
         WalletService.printTx("redirectionTx for sig creation", redirectionTx);
         WalletService.verifyTransaction(redirectionTx);
         return mySignature.encodeToDER();
+    }
+
+    // TODO: Move these methods (and maybe also add KeyCrypterException to the throws clauses)...
+    private static ECKey.ECDSASignature sign(ECKey keyPair,
+                                             Sha256Hash input,
+                                             @Nullable RandomNonce randomNonce,
+                                             @Nullable KeyParameter aesKey) {
+        DSAKCalculator kCalculator = randomNonce != null ? randomNonce.getKCalculator(aesKey) : new HMacDSAKCalculator(new SHA256Digest());
+        return sign(keyPair, input, kCalculator, aesKey);
+    }
+
+    private static ECKey.ECDSASignature sign(ECKey keyPair,
+                                             Sha256Hash input,
+                                             DSAKCalculator kCalculator,
+                                             @Nullable KeyParameter aesKey) {
+        return sign(aesKey != null ? keyPair.decrypt(aesKey) : keyPair, input, kCalculator);
+    }
+
+    private static ECKey.ECDSASignature sign(ECKey keyPair,
+                                             Sha256Hash input,
+                                             DSAKCalculator kCalculator) {
+        ECDSASigner signer = new ECDSASigner(kCalculator);
+        ECPrivateKeyParameters privKey = new ECPrivateKeyParameters(keyPair.getPrivKey(), ECKey.CURVE);
+        signer.init(true, privKey);
+        BigInteger[] components = signer.generateSignature(input.getBytes());
+        return new ECKey.ECDSASignature(components[0], components[1]).toCanonicalised();
     }
 
     public Transaction finalizeRedirectionTransaction(TransactionOutput warningTxOutput,
@@ -116,8 +150,8 @@ public class RedirectionTransactionFactory {
         ECKey.ECDSASignature buyerECDSASignature = ECKey.ECDSASignature.decodeFromDER(buyerSignature);
         ECKey.ECDSASignature sellerECDSASignature = ECKey.ECDSASignature.decodeFromDER(sellerSignature);
 
-        checkArgument(!buyerECDSASignature.r.testBit(255), "buyer signature should be low-R");
-        checkArgument(!sellerECDSASignature.r.testBit(255), "seller signature should be low-R");
+//        checkArgument(!buyerECDSASignature.r.testBit(255), "buyer signature should be low-R");
+//        checkArgument(!sellerECDSASignature.r.testBit(255), "seller signature should be low-R");
 
         TransactionSignature buyerTxSig = new TransactionSignature(buyerECDSASignature, Transaction.SigHash.ALL, false);
         TransactionSignature sellerTxSig = new TransactionSignature(sellerECDSASignature, Transaction.SigHash.ALL, false);

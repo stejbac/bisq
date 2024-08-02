@@ -30,6 +30,8 @@ import com.google.protobuf.Message;
 
 import org.bitcoinj.core.Transaction;
 
+import java.math.BigInteger;
+
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -54,6 +56,7 @@ public final class TradingPeer implements TradePeer {
 
     transient private String warningTxFeeBumpAddress;
     transient private String redirectTxFeeBumpAddress;
+    transient private BigInteger peersRedirectTxSignatureRComponent;
 
     transient private Transaction warningTx;
     transient private byte[] warningTxSellerSignature;

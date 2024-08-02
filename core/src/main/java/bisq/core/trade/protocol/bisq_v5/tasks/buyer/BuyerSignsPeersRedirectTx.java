@@ -19,6 +19,7 @@ package bisq.core.trade.protocol.bisq_v5.tasks.buyer;
 
 import bisq.core.btc.wallet.BtcWalletService;
 import bisq.core.btc.wallet.TradeWalletService;
+import bisq.core.crypto.RandomNonce;
 import bisq.core.trade.model.bisq_v1.Trade;
 import bisq.core.trade.protocol.bisq_v1.model.TradingPeer;
 import bisq.core.trade.protocol.bisq_v1.tasks.TradeTask;
@@ -54,13 +55,15 @@ public class BuyerSignsPeersRedirectTx extends TradeTask {
             byte[] myMultiSigPubKey = processModel.getMyMultiSigPubKey();
             byte[] peersMultiSigPubKey = tradingPeer.getMultiSigPubKey();
             DeterministicKey myMultiSigKeyPair = btcWalletService.getMultiSigKeyPair(tradeId, myMultiSigPubKey);
+            RandomNonce randomNonce = processModel.getPeersRedirectTxSignatureNonce();
             byte[] signature = tradeWalletService.signRedirectionTx(warningTxOutput,
                     peersRedirectTx,
                     false,
                     claimDelay,
                     myMultiSigPubKey,
                     peersMultiSigPubKey,
-                    myMultiSigKeyPair);
+                    myMultiSigKeyPair,
+                    randomNonce);
             tradingPeer.setRedirectTxBuyerSignature(signature);
 
             processModel.getTradeManager().requestPersistence();

@@ -274,6 +274,7 @@ message InputsForDepositTxRequest {
     int32 burning_man_selection_height = 28;  // Added in v 1.9.7
     string takers_warning_tx_fee_bump_address = 29;  // Added for v5 protocol
     string takers_redirect_tx_fee_bump_address = 30;  // Added for v5 protocol
+    bytes makers_redirect_tx_taker_signature_r_component = 31;  // Added for v5 protocol
 }
 
 // Used in protocol version 4 only

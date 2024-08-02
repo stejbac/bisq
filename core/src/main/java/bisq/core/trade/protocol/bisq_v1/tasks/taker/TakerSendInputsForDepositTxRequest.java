@@ -19,6 +19,8 @@ package bisq.core.trade.protocol.bisq_v1.tasks.taker;
 
 import bisq.core.btc.model.AddressEntry;
 import bisq.core.btc.wallet.BtcWalletService;
+import bisq.core.btc.wallet.TradeWalletService;
+import bisq.core.crypto.RandomNonce;
 import bisq.core.trade.model.bisq_v1.Trade;
 import bisq.core.trade.protocol.bisq_v1.messages.InputsForDepositTxRequest;
 import bisq.core.trade.protocol.bisq_v1.model.ProcessModel;
@@ -107,6 +109,18 @@ public class TakerSendInputsForDepositTxRequest extends TradeTask {
             int burningManSelectionHeight = processModel.getDelayedPayoutTxReceiverService().getBurningManSelectionHeight();
             processModel.setBurningManSelectionHeight(burningManSelectionHeight);
 
+            byte[] makersRedirectTxTakerSignatureRComponent;
+            if (processModel.getWarningTxFeeBumpAddress() != null) {
+                // v5 trade protocol
+                TradeWalletService tradeWalletService = processModel.getTradeWalletService();
+                RandomNonce randomNonce = RandomNonce.create(walletService.getKeyCrypter(), tradeWalletService.getAesKey());
+                processModel.setPeersRedirectTxSignatureNonce(randomNonce);
+                makersRedirectTxTakerSignatureRComponent = randomNonce.getRComponent().toByteArray();
+            } else {
+                // v4 trade protocol
+                makersRedirectTxTakerSignatureRComponent = null;
+            }
+
             String takersPaymentMethodId = checkNotNull(processModel.getPaymentAccountPayload(trade)).getPaymentMethodId();
             InputsForDepositTxRequest request = new InputsForDepositTxRequest(
                     offerId,
@@ -139,7 +153,8 @@ public class TakerSendInputsForDepositTxRequest extends TradeTask {
                     takersPaymentMethodId,
                     burningManSelectionHeight,
                     processModel.getWarningTxFeeBumpAddress(),
-                    processModel.getRedirectTxFeeBumpAddress());
+                    processModel.getRedirectTxFeeBumpAddress(),
+                    makersRedirectTxTakerSignatureRComponent);
             log.info("Send {} with offerId {} and uid {} to peer {}",
                     request.getClass().getSimpleName(), request.getTradeId(),
                     request.getUid(), trade.getTradingPeerNodeAddress());

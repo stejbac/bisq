@@ -96,7 +96,6 @@ public class Issuance implements PersistablePayload, NetworkPayload, ImmutableDa
     public boolean equals(Object o) {
         if (this == o) return true;
         if (!(o instanceof Issuance)) return false;
-        if (!super.equals(o)) return false;
         Issuance issuance = (Issuance) o;
         return chainHeight == issuance.chainHeight &&
                 amount == issuance.amount &&
@@ -107,6 +106,6 @@ public class Issuance implements PersistablePayload, NetworkPayload, ImmutableDa
 
     @Override
     public int hashCode() {
-        return Objects.hash(super.hashCode(), txId, chainHeight, amount, pubKey, issuanceType.name());
+        return Objects.hash(txId, chainHeight, amount, pubKey, issuanceType.name());
     }
 }

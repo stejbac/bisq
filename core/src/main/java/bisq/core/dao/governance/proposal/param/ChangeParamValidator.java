@@ -145,8 +145,8 @@ public class ChangeParamValidator extends ProposalValidator implements Consensus
             case REIMBURSEMENT_MAX_AMOUNT:
                 checkArgument(inputValueAsCoin.value >= Restrictions.getMinNonDustOutput().value,
                         Res.get("validation.amountBelowDust", Restrictions.getMinNonDustOutput().value));
-                checkArgument(inputValueAsCoin.value <= 200000000,
-                        Res.get("validation.inputTooLarge", "200 000 BSQ"));
+                checkArgument(inputValueAsCoin.value <= 2_000_000_00,
+                        Res.get("validation.inputTooLarge", "2 000 000 BSQ"));
                 break;
             case QUORUM_COMP_REQUEST:
             case QUORUM_REIMBURSEMENT:
@@ -155,13 +155,13 @@ public class ChangeParamValidator extends ProposalValidator implements Consensus
             case QUORUM_CONFISCATION:
             case QUORUM_GENERIC:
             case QUORUM_REMOVE_ASSET:
-                checkArgument(inputValueAsCoin.value > 100000,
-                        Res.get("validation.inputTooSmall", "1000 BSQ"));
+                checkArgument(inputValueAsCoin.value > 1_000_00,
+                        Res.get("validation.inputTooSmall", "1 000 BSQ"));
                 break;
             case ASSET_LISTING_FEE_PER_DAY:
                 break;
             case BONDED_ROLE_FACTOR:
-                checkArgument(inputValueAsCoin.value > 100,
+                checkArgument(inputValueAsCoin.value > 1_00,
                         Res.get("validation.inputTooSmall", "1 BSQ"));
                 break;
         }
