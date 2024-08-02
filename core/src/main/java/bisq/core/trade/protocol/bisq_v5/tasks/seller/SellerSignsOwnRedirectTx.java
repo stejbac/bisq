@@ -60,7 +60,8 @@ public class SellerSignsOwnRedirectTx extends TradeTask {
                     claimDelay,
                     peersMultiSigPubKey,
                     myMultiSigPubKey,
-                    myMultiSigKeyPair);
+                    myMultiSigKeyPair,
+                    null);
             processModel.setRedirectTxSellerSignature(signature);
 
             processModel.getTradeManager().requestPersistence();

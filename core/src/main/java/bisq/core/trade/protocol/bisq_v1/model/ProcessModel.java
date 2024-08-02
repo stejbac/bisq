@@ -22,6 +22,7 @@ import bisq.core.btc.model.RawTransactionInput;
 import bisq.core.btc.wallet.BsqWalletService;
 import bisq.core.btc.wallet.BtcWalletService;
 import bisq.core.btc.wallet.TradeWalletService;
+import bisq.core.crypto.RandomNonce;
 import bisq.core.dao.DaoFacade;
 import bisq.core.dao.burningman.BtcFeeReceiverService;
 import bisq.core.dao.burningman.DelayedPayoutTxReceiverService;
@@ -109,6 +110,8 @@ public class ProcessModel implements ProtocolModel<TradingPeer> {
     transient private String warningTxFeeBumpAddress;
     @Setter
     transient private String redirectTxFeeBumpAddress;
+    @Setter
+    transient private RandomNonce peersRedirectTxSignatureNonce;
 
     @Setter
     transient private Transaction warningTx;

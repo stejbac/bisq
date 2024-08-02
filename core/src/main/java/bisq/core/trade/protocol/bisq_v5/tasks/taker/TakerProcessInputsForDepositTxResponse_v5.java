@@ -28,6 +28,8 @@ import bisq.core.trade.protocol.bisq_v5.messages.InputsForDepositTxResponse_v5;
 import bisq.common.config.Config;
 import bisq.common.taskrunner.TaskRunner;
 
+import org.bitcoinj.core.ECKey;
+
 import java.util.Optional;
 
 import lombok.extern.slf4j.Slf4j;
@@ -93,17 +95,21 @@ public class TakerProcessInputsForDepositTxResponse_v5 extends TradeTask {
 
             tradingPeer.setWarningTxFeeBumpAddress(response.getMakersWarningTxFeeBumpAddress());
             tradingPeer.setRedirectTxFeeBumpAddress(response.getMakersRedirectTxFeeBumpAddress());
+            byte[] takersRedirectTxMakerSignature;
             if (trade instanceof SellerAsTakerTrade) {
                 processModel.setWarningTxBuyerSignature(response.getSellersWarningTxMakerSignature());
                 tradingPeer.setWarningTxBuyerSignature(response.getBuyersWarningTxMakerSignature());
                 processModel.setRedirectTxBuyerSignature(response.getSellersRedirectTxMakerSignature());
                 tradingPeer.setRedirectTxBuyerSignature(response.getBuyersRedirectTxMakerSignature());
+                takersRedirectTxMakerSignature = response.getSellersRedirectTxMakerSignature();
             } else {
                 processModel.setWarningTxSellerSignature(response.getBuyersWarningTxMakerSignature());
                 tradingPeer.setWarningTxSellerSignature(response.getSellersWarningTxMakerSignature());
                 processModel.setRedirectTxSellerSignature(response.getBuyersRedirectTxMakerSignature());
                 tradingPeer.setRedirectTxSellerSignature(response.getSellersRedirectTxMakerSignature());
+                takersRedirectTxMakerSignature = response.getBuyersRedirectTxMakerSignature();
             }
+            tradingPeer.setPeersRedirectTxSignatureRComponent(ECKey.ECDSASignature.decodeFromDER(takersRedirectTxMakerSignature).r);
 
             // update to the latest peer address of our peer if the message is correct
             trade.setTradingPeerNodeAddress(processModel.getTempTradingPeerNodeAddress());

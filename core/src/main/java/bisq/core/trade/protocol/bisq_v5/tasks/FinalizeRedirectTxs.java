@@ -26,10 +26,13 @@ import bisq.core.trade.protocol.bisq_v5.model.StagedPayoutTxParameters;
 
 import bisq.common.taskrunner.TaskRunner;
 
+import org.bitcoinj.core.ECKey;
 import org.bitcoinj.core.Transaction;
 import org.bitcoinj.core.TransactionOutput;
 
 import lombok.extern.slf4j.Slf4j;
+
+import static com.google.common.base.Preconditions.checkArgument;
 
 @Slf4j
 public class FinalizeRedirectTxs extends TradeTask {
@@ -51,11 +54,15 @@ public class FinalizeRedirectTxs extends TradeTask {
             byte[] sellerPubKey = amBuyer ? tradingPeer.getMultiSigPubKey() : processModel.getMyMultiSigPubKey();
             long claimDelay = StagedPayoutTxParameters.getClaimDelay();
 
-            // Finalize our redirect tx.
+            // Finalize our redirect tx, making sure that it is recoverable from our seed phrase & blockchain data.
             TransactionOutput peersWarningTxOutput = tradingPeer.getWarningTx().getOutput(0);
             Transaction redirectTx = processModel.getRedirectTx();
             byte[] buyerSignature = processModel.getRedirectTxBuyerSignature();
             byte[] sellerSignature = processModel.getRedirectTxSellerSignature();
+
+            ECKey.ECDSASignature peerECDSASignature = ECKey.ECDSASignature.decodeFromDER(amBuyer ? sellerSignature : buyerSignature);
+            checkArgument(peerECDSASignature.r.equals(tradingPeer.getPeersRedirectTxSignatureRComponent()),
+                    "Unrecoverable redirect tx: peer signature r-component differs from what we hid in the warning tx signature.");
 
             Transaction finalizedRedirectTx = tradeWalletService.finalizeRedirectionTx(peersWarningTxOutput,
                     redirectTx,

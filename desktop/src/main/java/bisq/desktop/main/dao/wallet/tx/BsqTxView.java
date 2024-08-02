@@ -467,6 +467,7 @@ public class BsqTxView extends ActivatableView<GridPane, Void> implements BsqBal
                     }
                 });
         tableView.getColumns().add(column);
+        column.setComparator(Comparator.comparing(BsqTxListItem::getTxId));
     }
 
     private void addInformationColumn() {
@@ -769,6 +770,7 @@ public class BsqTxView extends ActivatableView<GridPane, Void> implements BsqBal
                 });
 
         tableView.getColumns().add(column);
+        column.setComparator(Comparator.comparing(BsqTxListItem::getTxType));
     }
 }
 

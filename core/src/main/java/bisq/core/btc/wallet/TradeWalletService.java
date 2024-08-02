@@ -27,6 +27,7 @@ import bisq.core.btc.model.RawTransactionInput;
 import bisq.core.btc.setup.WalletConfig;
 import bisq.core.btc.setup.WalletsSetup;
 import bisq.core.crypto.LowRSigningKey;
+import bisq.core.crypto.RandomNonce;
 import bisq.core.locale.Res;
 import bisq.core.user.Preferences;
 
@@ -879,7 +880,8 @@ public class TradeWalletService {
                                     long claimDelay,
                                     byte[] buyerPubKey,
                                     byte[] sellerPubKey,
-                                    DeterministicKey myMultiSigKeyPair)
+                                    DeterministicKey myMultiSigKeyPair,
+                                    @Nullable RandomNonce randomNonce)
             throws TransactionVerificationException {
         return redirectionTransactionFactory.signRedirectionTransaction(
                 warningTxOutput,
@@ -889,6 +891,7 @@ public class TradeWalletService {
                 buyerPubKey,
                 sellerPubKey,
                 myMultiSigKeyPair,
+                randomNonce,
                 aesKey
         );
     }
