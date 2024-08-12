@@ -22,7 +22,6 @@ import org.bitcoinj.crypto.KeyCrypter;
 
 import org.bouncycastle.crypto.params.KeyParameter;
 import org.bouncycastle.crypto.signers.DSAKCalculator;
-import org.bouncycastle.math.ec.ECPoint;
 
 import java.security.SecureRandom;
 
@@ -32,55 +31,39 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.annotation.Nullable;
 
-public final class RandomNonce extends ECKey {
+public final class RandomNonce {
+    private static final SecureRandom RND = new SecureRandom();
+
+    private final ECKey nonce;
     private final AtomicBoolean used = new AtomicBoolean();
 
-    // FIXME: This doesn't lead to a completely uniformly random nonce, because of some minimum NAF-weight filtering
-    //  that BouncyCastle does on the randomly sampled private key. We should probably skip that to avoid any bias.
-    private RandomNonce() {
-    }
-
-    private RandomNonce(ECPoint pub) {
-        super(null, pub);
+    private RandomNonce(ECKey nonce) {
+        this.nonce = nonce;
     }
 
     public static RandomNonce create(KeyCrypter keyCrypter, @Nullable KeyParameter aesKey) {
-        // Grind to find a nonce giving a lower-R signature (which reduces entropy by 1 bit).
-        RandomNonce nonce;
+        // Grind to find a nonce giving a low-R signature (which reduces entropy by 1 bit).
+        ECKey nonce;
         do {
-            nonce = new RandomNonce();
+            nonce = ECKey.fromPrivate(new BigInteger(256, RND));
         } while (nonce.getPubKey()[1] < 0);
-        // Recreate encrypted if aesKey is available, as the nonce should be treated with the same
+        // Encrypt if aesKey is available, as the nonce should be treated with the same
         // level of security as a private key and therefore encrypted at rest where possible.
         if (aesKey != null) {
-            var encryptedNonce = new RandomNonce(nonce.getPubKeyPoint());
-            encryptedNonce.keyCrypter = keyCrypter;
-            encryptedNonce.encryptedPrivateKey = keyCrypter.encrypt(nonce.getPrivKeyBytes(), aesKey);
-            encryptedNonce.creationTimeSeconds = nonce.creationTimeSeconds;
-            return encryptedNonce;
+            nonce = nonce.encrypt(keyCrypter, aesKey);
         }
-        return nonce;
+        return new RandomNonce(nonce);
     }
 
     public BigInteger getRComponent() {
-        return getPubKeyPoint().normalize().getAffineXCoord().toBigInteger();
+        return nonce.getPubKeyPoint().normalize().getAffineXCoord().toBigInteger();
     }
 
     public DSAKCalculator getKCalculator(@Nullable KeyParameter aesKey) {
-        BigInteger k = (aesKey != null ? decrypt(aesKey) : this).getPrivKey();
-        return new DSAKCalculator() {
+        BigInteger k = (nonce.getKeyCrypter() != null ? nonce.decrypt(aesKey) : nonce).getPrivKey();
+        return new DeterministicDSAKCalculator() {
             @Override
-            public boolean isDeterministic() {
-                return false;
-            }
-
-            @Override
-            public void init(BigInteger n, SecureRandom random) {
-            }
-
-            @Override
-            public void init(BigInteger n, BigInteger d, byte[] message) {
-                throw new IllegalStateException("Operation not supported");
+            void init(BigInteger n, BigInteger d, BigInteger e) {
             }
 
             @Override

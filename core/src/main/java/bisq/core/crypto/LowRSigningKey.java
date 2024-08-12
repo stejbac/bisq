@@ -22,12 +22,20 @@ import org.bitcoinj.core.Sha256Hash;
 import org.bitcoinj.crypto.KeyCrypterException;
 import org.bitcoinj.crypto.LazyECPoint;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import org.bouncycastle.crypto.params.ECPrivateKeyParameters;
 import org.bouncycastle.crypto.params.KeyParameter;
 import org.bouncycastle.crypto.signers.DSAKCalculator;
 import org.bouncycastle.crypto.signers.ECDSASigner;
 
 import java.math.BigInteger;
+
+import java.util.Set;
+
+import javax.annotation.Nullable;
+
+import static com.google.common.base.Preconditions.checkArgument;
 
 public class LowRSigningKey extends ECKey {
     private final ECKey originalKey;
@@ -64,5 +72,38 @@ public class LowRSigningKey extends ECKey {
             components = signer.generateSignature(input.getBytes());
         } while (components[0].bitLength() >= 256);
         return new ECDSASignature(components[0], components[1]).toCanonicalised();
+    }
+
+    public ECDSASignature sign(Sha256Hash input, @Nullable RandomNonce randomNonce, @Nullable KeyParameter aesKey) {
+        LowRSigningKey key = getKeyCrypter() != null ? decrypt(aesKey) : this;
+        return randomNonce != null
+                ? key.doSign(input, key.getPrivKey(), randomNonce.getKCalculator(aesKey))
+                : key.doSign(input, key.getPrivKey());
+    }
+
+    public ECDSASignature sign(Sha256Hash input, @Nullable BigInteger scalarToHide, @Nullable KeyParameter aesKey) {
+        LowRSigningKey key = getKeyCrypter() != null ? decrypt(aesKey) : this;
+        return scalarToHide != null
+                ? key.doSign(input, key.getPrivKey(), new ScalarHidingDSAKCalculator().withScalarToHide(scalarToHide))
+                : key.doSign(input, key.getPrivKey());
+    }
+
+    public Set<BigInteger> recoveredHiddenScalarCandidates(Sha256Hash sigHash,
+                                                           ECDSASignature signature,
+                                                           @Nullable KeyParameter aesKey) {
+        checkArgument(verify(sigHash, signature));
+        LowRSigningKey key = getKeyCrypter() != null ? decrypt(aesKey) : this;
+        BigInteger n = CURVE.getN();
+        BigInteger d = key.getPrivKey();
+        BigInteger e = DeterministicDSAKCalculator.toScalar(sigHash.getBytes(), n).mod(n);
+        BigInteger k = signature.s.modInverse(n).multiply(e.add(d.multiply(signature.r))).mod(n);
+        var kCalculator = new ScalarHidingDSAKCalculator();
+        return kCalculator.recoveredHiddenScalarCandidates(k, LowRSigningKey::liftsToLowR);
+    }
+
+    @VisibleForTesting
+    static boolean liftsToLowR(BigInteger k) {
+        byte[] liftedPointBytes = ECKey.publicKeyFromPrivate(k, true);
+        return liftedPointBytes.length == 33 && liftedPointBytes[1] >= 0;
     }
 }

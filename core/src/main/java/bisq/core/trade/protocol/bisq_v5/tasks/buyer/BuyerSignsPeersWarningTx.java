@@ -29,7 +29,11 @@ import org.bitcoinj.core.Transaction;
 import org.bitcoinj.core.TransactionOutput;
 import org.bitcoinj.crypto.DeterministicKey;
 
+import java.math.BigInteger;
+
 import lombok.extern.slf4j.Slf4j;
+
+import static com.google.common.base.Preconditions.checkNotNull;
 
 @Slf4j
 public class BuyerSignsPeersWarningTx extends TradeTask {
@@ -51,13 +55,16 @@ public class BuyerSignsPeersWarningTx extends TradeTask {
             Transaction depositTx = btcWalletService.getTxFromSerializedTx(processModel.getPreparedDepositTx());
             TransactionOutput depositTxOutput = depositTx.getOutput(0);
             byte[] buyerPubKey = processModel.getMyMultiSigPubKey();
-            DeterministicKey myMultiSigKeyPair = btcWalletService.getMultiSigKeyPair(tradeId, buyerPubKey);
             byte[] sellerPubKey = tradingPeer.getMultiSigPubKey();
+            DeterministicKey myMultiSigKeyPair = btcWalletService.getMultiSigKeyPair(tradeId, buyerPubKey);
+            BigInteger scalarToHide = checkNotNull(tradingPeer.getPeersRedirectTxSignatureRComponent(),
+                    "Unrecoverable redirect tx: missing peer signature r-component to hide in the warning tx signature.");
             byte[] signature = tradeWalletService.signWarningTx(peersWarningTx,
                     depositTxOutput,
-                    myMultiSigKeyPair,
                     buyerPubKey,
-                    sellerPubKey);
+                    sellerPubKey,
+                    myMultiSigKeyPair,
+                    scalarToHide);
             tradingPeer.setWarningTxBuyerSignature(signature);
 
             processModel.getTradeManager().requestPersistence();
