@@ -40,6 +40,8 @@ import org.bitcoinj.script.ScriptBuilder;
 
 import org.bouncycastle.crypto.params.KeyParameter;
 
+import java.math.BigInteger;
+
 import javax.annotation.Nullable;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -89,9 +91,10 @@ public class WarningTransactionFactory {
 
     public byte[] signWarningTransaction(Transaction warningTx,
                                          TransactionOutput depositTxOutput,
-                                         DeterministicKey myMultiSigKeyPair,
                                          byte[] buyerPubKey,
                                          byte[] sellerPubKey,
+                                         DeterministicKey myMultiSigKeyPair,
+                                         @Nullable BigInteger scalarToHide,
                                          @Nullable KeyParameter aesKey)
             throws TransactionVerificationException {
 
@@ -101,7 +104,7 @@ public class WarningTransactionFactory {
         Sha256Hash sigHash = warningTx.hashForWitnessSignature(0, redeemScript,
                 warningTxInputValue, Transaction.SigHash.ALL, false);
 
-        ECKey.ECDSASignature mySignature = LowRSigningKey.from(myMultiSigKeyPair).sign(sigHash, aesKey);
+        ECKey.ECDSASignature mySignature = LowRSigningKey.from(myMultiSigKeyPair).sign(sigHash, scalarToHide, aesKey);
         WalletService.printTx("warningTx for sig creation", warningTx);
         WalletService.verifyTransaction(warningTx);
         return mySignature.encodeToDER();

@@ -63,6 +63,8 @@ import com.google.common.collect.ImmutableList;
 
 import org.bouncycastle.crypto.params.KeyParameter;
 
+import java.math.BigInteger;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -828,16 +830,18 @@ public class TradeWalletService {
 
     public byte[] signWarningTx(Transaction warningTx,
                                 TransactionOutput depositTxOutput,
-                                DeterministicKey myMultiSigKeyPair,
                                 byte[] buyerPubKey,
-                                byte[] sellerPubKey)
+                                byte[] sellerPubKey,
+                                DeterministicKey myMultiSigKeyPair,
+                                @Nullable BigInteger scalarToHide)
             throws TransactionVerificationException {
         return warningTransactionFactory.signWarningTransaction(
                 warningTx,
                 depositTxOutput,
-                myMultiSigKeyPair,
                 buyerPubKey,
                 sellerPubKey,
+                myMultiSigKeyPair,
+                scalarToHide,
                 aesKey
         );
     }
