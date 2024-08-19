@@ -24,6 +24,8 @@ import bisq.core.trade.protocol.bisq_v5.messages.PreparedTxBuyerSignaturesMessag
 
 import bisq.common.taskrunner.TaskRunner;
 
+import org.bitcoinj.core.ECKey;
+
 import lombok.extern.slf4j.Slf4j;
 
 import static bisq.core.util.Validator.checkTradeId;
@@ -52,6 +54,17 @@ public class SellerProcessPreparedTxBuyerSignaturesMessage extends TradeTask {
                 processModel.getTradePeer().setRedirectTxBuyerSignature(message.getBuyersRedirectTxBuyerSignature());
                 processModel.setRedirectTxBuyerSignature(message.getSellersRedirectTxBuyerSignature());
                 processModel.setDepositTx(processModel.getBtcWalletService().getTxFromSerializedTx(processModel.getPreparedDepositTx()));
+
+                // Re-sign the deposit tx, to hide the s-component of the peer's signature for our redirect tx in our
+                // first input witness. (The r-component was already hidden in our signature for the peer's warning tx.)
+                int numBuyerInputs = (int) processModel.getDepositTx().getInputs().stream()
+                        .filter(input -> !input.hasWitness())
+                        .count();
+                processModel.getTradeWalletService().makerResignsDepositTxWithHiddenScalar(
+                        processModel.getDepositTx(),
+                        checkNotNull(processModel.getRawTransactionInputs()).get(0),
+                        ECKey.ECDSASignature.decodeFromDER(message.getSellersRedirectTxBuyerSignature()).s,
+                        numBuyerInputs);
             }
 
             // The deposit tx is finalized by adding all the buyer witnesses.

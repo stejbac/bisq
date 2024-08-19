@@ -145,10 +145,15 @@ public class DelayedPayoutTxReceiverService implements DaoStateListener {
 
     // We use a snapshot blockHeight to avoid failed trades in case maker and taker have different block heights.
     // The selection is deterministic based on DAO data.
-    // The block height is the last mod(10) height from the range of the last 10-20 blocks (139 -> 120; 140 -> 130, 141 -> 130).
+    // The block height is the last mod(10) height from the range of the last 5-14 blocks (134 -> 120; 135 -> 130, 136 -> 130).
     // We do not have the latest dao state by that but can ensure maker and taker have the same block.
     public int getBurningManSelectionHeight() {
-        return getSnapshotHeight(daoStateService.getGenesisBlockHeight(), currentChainHeight);
+        return getBurningManSelectionHeight(currentChainHeight);
+    }
+
+    // Used by redirect tx recovery logic, which involves guessing the creation chain height.
+    public int getBurningManSelectionHeight(int chainHeight) {
+        return getSnapshotHeight(daoStateService.getGenesisBlockHeight(), chainHeight);
     }
 
     public List<Tuple2<Long, String>> getReceivers(int burningManSelectionHeight,
@@ -170,7 +175,7 @@ public class DelayedPayoutTxReceiverService implements DaoStateListener {
                                                    long tradeTxFee,
                                                    long minTxWeight,
                                                    Set<ReceiverFlag> receiverFlags) {
-        checkArgument(burningManSelectionHeight >= MIN_SNAPSHOT_HEIGHT, "Selection height must be >= " + MIN_SNAPSHOT_HEIGHT);
+        checkArgument(burningManSelectionHeight >= MIN_SNAPSHOT_HEIGHT, "Selection height must be >= %s", MIN_SNAPSHOT_HEIGHT);
 
         boolean isBugfix6699Activated = receiverFlags.contains(BUGFIX_6699);
         boolean isProposal412Activated = receiverFlags.contains(PROPOSAL_412);

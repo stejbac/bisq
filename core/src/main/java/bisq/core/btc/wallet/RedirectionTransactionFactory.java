@@ -118,6 +118,17 @@ public class RedirectionTransactionFactory {
         ECKey.ECDSASignature buyerECDSASignature = ECKey.ECDSASignature.decodeFromDER(buyerSignature);
         ECKey.ECDSASignature sellerECDSASignature = ECKey.ECDSASignature.decodeFromDER(sellerSignature);
 
+        return finalizeRedirectionTransaction(warningTxOutput, redirectionTx, redeemScript, buyerECDSASignature, sellerECDSASignature);
+    }
+
+    // Also used by redirect tx recovery logic.
+    Transaction finalizeRedirectionTransaction(TransactionOutput warningTxOutput,
+                                               Transaction redirectionTx,
+                                               Script redeemScript,
+                                               ECKey.ECDSASignature buyerECDSASignature,
+                                               ECKey.ECDSASignature sellerECDSASignature)
+            throws TransactionVerificationException {
+
         checkArgument(!buyerECDSASignature.r.testBit(255), "buyer signature should be low-R");
         checkArgument(!sellerECDSASignature.r.testBit(255), "seller signature should be low-R");
 

@@ -23,6 +23,7 @@ import org.bitcoinj.crypto.KeyCrypterException;
 import org.bitcoinj.crypto.LazyECPoint;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.Sets;
 
 import org.bouncycastle.crypto.params.ECPrivateKeyParameters;
 import org.bouncycastle.crypto.params.KeyParameter;
@@ -98,7 +99,12 @@ public class LowRSigningKey extends ECKey {
         BigInteger e = DeterministicDSAKCalculator.toScalar(sigHash.getBytes(), n).mod(n);
         BigInteger k = signature.s.modInverse(n).multiply(e.add(d.multiply(signature.r))).mod(n);
         var kCalculator = new ScalarHidingDSAKCalculator();
-        return kCalculator.recoveredHiddenScalarCandidates(k, LowRSigningKey::liftsToLowR);
+        kCalculator.init(n, d, sigHash.getBytes());
+        // Because the input signature was likely canonicalized (that is, malleated to make it low-S),
+        // we don't know whether k or -k (mod n) was the original nonce, so must combine results of both.
+        return Sets.union(
+                kCalculator.recoveredHiddenScalarCandidates(k, LowRSigningKey::liftsToLowR),
+                kCalculator.recoveredHiddenScalarCandidates(n.subtract(k), LowRSigningKey::liftsToLowR));
     }
 
     @VisibleForTesting

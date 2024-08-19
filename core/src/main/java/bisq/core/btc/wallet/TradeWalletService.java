@@ -571,6 +571,7 @@ public class TradeWalletService {
      * @param sellerInputs              the connected outputs for all inputs of the seller
      * @param buyerPubKey               the public key of the buyer
      * @param sellerPubKey              the public key of the seller
+     * @param scalarToHide              an optional 256-bit scalar to hide in the signature of the taker's first input
      * @throws SigningException if (one of) the taker input(s) was of an unrecognized type for signing
      * @throws TransactionVerificationException if a non-P2WH maker-as-buyer input wasn't signed, the maker's MultiSig
      * script, contract hash or output amount doesn't match the taker's, or there was an unexpected problem with the
@@ -583,7 +584,8 @@ public class TradeWalletService {
                                            List<RawTransactionInput> buyerInputs,
                                            List<RawTransactionInput> sellerInputs,
                                            byte[] buyerPubKey,
-                                           byte[] sellerPubKey)
+                                           byte[] sellerPubKey,
+                                           @Nullable BigInteger scalarToHide)
             throws SigningException, TransactionVerificationException, WalletException {
         Transaction makersDepositTx = new Transaction(params, makersDepositTxSerialized);
 
@@ -651,7 +653,7 @@ public class TradeWalletService {
         int end = takerIsSeller ? depositTx.getInputs().size() : buyerInputs.size();
         for (int i = start; i < end; i++) {
             TransactionInput input = depositTx.getInput(i);
-            signInput(depositTx, input, i);
+            signInput(depositTx, input, i, i == start ? scalarToHide : null);
             WalletService.checkScriptSig(depositTx, input, i);
         }
 
@@ -698,6 +700,20 @@ public class TradeWalletService {
                 txInput.setWitness(witnessFromBuyer);
             }
         }
+    }
+
+    public void makerResignsDepositTxWithHiddenScalar(Transaction depositTx,
+                                                      RawTransactionInput rawTransactionInput,
+                                                      BigInteger scalarToHide,
+                                                      int inputIndex)
+            throws SigningException, TransactionVerificationException {
+        TransactionInput input = depositTx.getInput(inputIndex);
+        TransactionInput connectedInput = getTransactionInput(depositTx, input.getScriptBytes(), rawTransactionInput);
+        checkArgument(input.equals(connectedInput), "mismatched rawTransactionInput and depositTx input");
+        signInput(depositTx, connectedInput, inputIndex, checkNotNull(scalarToHide));
+        input.setScriptSig(connectedInput.getScriptSig());
+        input.setWitness(connectedInput.getWitness());
+        WalletService.checkScriptSig(depositTx, connectedInput, inputIndex);
     }
 
 
@@ -1557,9 +1573,16 @@ public class TradeWalletService {
     }
 
     private void signInput(Transaction transaction, TransactionInput input, int inputIndex) throws SigningException {
+        signInput(transaction, input, inputIndex, null);
+    }
+
+    private void signInput(Transaction transaction,
+                           TransactionInput input,
+                           int inputIndex,
+                           @Nullable BigInteger scalarToHide) throws SigningException {
         checkNotNull(input.getConnectedOutput(), "input.getConnectedOutput() must not be null");
         Script scriptPubKey = input.getConnectedOutput().getScriptPubKey();
-        ECKey sigKey = LowRSigningKey.from(input.getOutpoint().getConnectedKey(wallet));
+        LowRSigningKey sigKey = LowRSigningKey.from(input.getOutpoint().getConnectedKey(wallet));
         checkNotNull(sigKey, "signInput: sigKey must not be null. input.getOutpoint()=%s", input.getOutpoint());
         if (sigKey.isEncrypted()) {
             checkNotNull(aesKey);
@@ -1567,7 +1590,7 @@ public class TradeWalletService {
 
         if (ScriptPattern.isP2PK(scriptPubKey) || ScriptPattern.isP2PKH(scriptPubKey)) {
             Sha256Hash hash = transaction.hashForSignature(inputIndex, scriptPubKey, Transaction.SigHash.ALL, false);
-            ECKey.ECDSASignature signature = sigKey.sign(hash, aesKey);
+            ECKey.ECDSASignature signature = sigKey.sign(hash, scalarToHide, aesKey);
             TransactionSignature txSig = new TransactionSignature(signature, Transaction.SigHash.ALL, false);
             if (ScriptPattern.isP2PK(scriptPubKey)) {
                 input.setScriptSig(ScriptBuilder.createInputScript(txSig));
@@ -1578,8 +1601,9 @@ public class TradeWalletService {
             // scriptCode is expected to have the format of a legacy P2PKH output script
             Script scriptCode = ScriptBuilder.createP2PKHOutputScript(sigKey);
             Coin value = input.getValue();
-            TransactionSignature txSig = transaction.calculateWitnessSignature(inputIndex, sigKey, aesKey, scriptCode, value,
-                    Transaction.SigHash.ALL, false);
+            Sha256Hash hash = transaction.hashForWitnessSignature(inputIndex, scriptCode, value, Transaction.SigHash.ALL, false);
+            ECKey.ECDSASignature signature = sigKey.sign(hash, scalarToHide, aesKey);
+            TransactionSignature txSig = new TransactionSignature(signature, Transaction.SigHash.ALL, false);
             input.setScriptSig(ScriptBuilder.createEmpty());
             input.setWitness(TransactionWitness.redeemP2WPKH(txSig, sigKey));
         } else {

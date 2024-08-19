@@ -29,7 +29,10 @@ import bisq.core.trade.protocol.bisq_v1.tasks.TradeTask;
 import bisq.common.taskrunner.TaskRunner;
 
 import org.bitcoinj.core.Coin;
+import org.bitcoinj.core.ECKey;
 import org.bitcoinj.core.Transaction;
+
+import java.math.BigInteger;
 
 import java.util.Arrays;
 import java.util.List;
@@ -60,8 +63,7 @@ public class SellerAsTakerSignsDepositTx extends TradeTask {
             checkArgument(optionalMultiSigAddressEntry.isPresent(), "addressEntryOptional must be present");
             AddressEntry sellerMultiSigAddressEntry = optionalMultiSigAddressEntry.get();
             byte[] sellerMultiSigPubKey = processModel.getMyMultiSigPubKey();
-            checkArgument(Arrays.equals(sellerMultiSigPubKey,
-                    sellerMultiSigAddressEntry.getPubKey()),
+            checkArgument(Arrays.equals(sellerMultiSigPubKey, sellerMultiSigAddressEntry.getPubKey()),
                     "sellerMultiSigPubKey from AddressEntry must match the one from the trade data. trade id =" + id);
 
             Coin sellerInput = Coin.valueOf(sellerInputs.stream().mapToLong(input -> input.value).sum());
@@ -77,6 +79,11 @@ public class SellerAsTakerSignsDepositTx extends TradeTask {
 
             TradingPeer tradingPeer = processModel.getTradePeer();
 
+            // If v5 protocol, hide the s-component of the peer's signature for our redirect tx in our deposit
+            // tx signatures. (The r-component was already hidden in our signature for the peer's warning tx.)
+            BigInteger scalarToHide = processModel.getRedirectTxBuyerSignature() != null ?
+                    ECKey.ECDSASignature.decodeFromDER(processModel.getRedirectTxBuyerSignature()).s : null;
+
             Transaction depositTx = processModel.getTradeWalletService().takerSignsDepositTx(
                     true,
                     processModel.getPreparedDepositTx(),
@@ -84,7 +91,8 @@ public class SellerAsTakerSignsDepositTx extends TradeTask {
                     checkNotNull(tradingPeer.getRawTransactionInputs()),
                     sellerInputs,
                     tradingPeer.getMultiSigPubKey(),
-                    sellerMultiSigPubKey);
+                    sellerMultiSigPubKey,
+                    scalarToHide);
 
             // We set the deposit tx to trade once we have it published
             processModel.setDepositTx(depositTx);

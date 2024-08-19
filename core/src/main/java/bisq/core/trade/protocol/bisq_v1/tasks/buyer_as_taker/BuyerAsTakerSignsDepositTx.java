@@ -29,7 +29,10 @@ import bisq.common.crypto.Hash;
 import bisq.common.taskrunner.TaskRunner;
 
 import org.bitcoinj.core.Coin;
+import org.bitcoinj.core.ECKey;
 import org.bitcoinj.core.Transaction;
+
+import java.math.BigInteger;
 
 import java.util.Arrays;
 import java.util.List;
@@ -84,6 +87,12 @@ public class BuyerAsTakerSignsDepositTx extends TradeTask {
 
             List<RawTransactionInput> sellerInputs = checkNotNull(tradingPeer.getRawTransactionInputs());
             byte[] sellerMultiSigPubKey = tradingPeer.getMultiSigPubKey();
+
+            // If v5 protocol, hide the s-component of the peer's signature for our redirect tx in our deposit
+            // tx signatures. (The r-component was already hidden in our signature for the peer's warning tx.)
+            BigInteger scalarToHide = processModel.getRedirectTxSellerSignature() != null ?
+                    ECKey.ECDSASignature.decodeFromDER(processModel.getRedirectTxSellerSignature()).s : null;
+
             Transaction depositTx = processModel.getTradeWalletService().takerSignsDepositTx(
                     false,
                     processModel.getPreparedDepositTx(),
@@ -91,7 +100,8 @@ public class BuyerAsTakerSignsDepositTx extends TradeTask {
                     buyerInputs,
                     sellerInputs,
                     buyerMultiSigPubKey,
-                    sellerMultiSigPubKey);
+                    sellerMultiSigPubKey,
+                    scalarToHide);
             processModel.setDepositTx(depositTx);
 
             processModel.getTradeManager().requestPersistence();
