@@ -33,6 +33,8 @@ import bisq.core.provider.price.PriceFeedService;
 import bisq.common.app.AppModule;
 import bisq.common.config.Config;
 
+import org.bitcoinj.core.NetworkParameters;
+
 import com.google.inject.Singleton;
 import com.google.inject.TypeLiteral;
 
@@ -40,6 +42,7 @@ import java.io.File;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.Supplier;
 
 import static bisq.common.config.Config.PROVIDERS;
 import static bisq.common.config.Config.WALLET_DIR;
@@ -72,6 +75,7 @@ public class BitcoinModule extends AppModule {
         } else {
             bind(RegTestHost.class).toInstance(RegTestHost.REMOTE_HOST);
         }
+        bind(new TypeLiteral<Supplier<NetworkParameters>>(){}).toInstance(Config::baseCurrencyNetworkParameters);
 
         bind(File.class).annotatedWith(named(WALLET_DIR)).toInstance(config.walletDir);
 

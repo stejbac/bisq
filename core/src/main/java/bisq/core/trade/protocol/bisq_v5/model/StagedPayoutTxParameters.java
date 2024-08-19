@@ -19,6 +19,9 @@ package bisq.core.trade.protocol.bisq_v5.model;
 
 import bisq.common.config.Config;
 
+import org.bitcoinj.core.NetworkParameters;
+import org.bitcoinj.params.RegTestParams;
+
 public class StagedPayoutTxParameters {
     // 10 days
     private static final long CLAIM_DELAY = 144 * 10;
@@ -36,18 +39,26 @@ public class StagedPayoutTxParameters {
     private static final long MIN_TX_FEE_RATE = 10;
 
     public static long getClaimDelay() {
-        return Config.baseCurrencyNetwork().isRegtest() ? 5 : CLAIM_DELAY;
+        return getClaimDelay(Config.baseCurrencyNetworkParameters());
+    }
+
+    public static long getClaimDelay(NetworkParameters params) {
+        return params.getId().equals(RegTestParams.ID_REGTEST) ? 5 : CLAIM_DELAY;
     }
 
     public static long getWarningTxMiningFee(long depositTxFeeRate) {
-        return (getFeePerVByte(depositTxFeeRate) * StagedPayoutTxParameters.WARNING_TX_EXPECTED_WEIGHT + 3) / 4;
+        return (getFeePerVByte(depositTxFeeRate) * WARNING_TX_EXPECTED_WEIGHT + 3) / 4;
     }
 
     public static long getClaimTxMiningFee(long txFeePerVByte) {
-        return (txFeePerVByte * StagedPayoutTxParameters.CLAIM_TX_EXPECTED_WEIGHT + 3) / 4;
+        return (txFeePerVByte * CLAIM_TX_EXPECTED_WEIGHT + 3) / 4;
     }
 
     private static long getFeePerVByte(long depositTxFeeRate) {
-        return Math.max(StagedPayoutTxParameters.MIN_TX_FEE_RATE, depositTxFeeRate);
+        return Math.max(MIN_TX_FEE_RATE, depositTxFeeRate);
+    }
+
+    public static long recoverDepositTxFeeRate(long warningTxMiningFee) {
+        return warningTxMiningFee * 4 / WARNING_TX_EXPECTED_WEIGHT;
     }
 }

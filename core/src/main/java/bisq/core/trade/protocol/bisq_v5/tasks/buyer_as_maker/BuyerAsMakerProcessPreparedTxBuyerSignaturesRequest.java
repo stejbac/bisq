@@ -23,6 +23,9 @@ import bisq.core.trade.protocol.bisq_v5.messages.PreparedTxBuyerSignaturesReques
 
 import bisq.common.taskrunner.TaskRunner;
 
+import org.bitcoinj.core.ECKey;
+import org.bitcoinj.core.Transaction;
+
 import lombok.extern.slf4j.Slf4j;
 
 import static bisq.core.util.Validator.checkTradeId;
@@ -47,6 +50,16 @@ public class BuyerAsMakerProcessPreparedTxBuyerSignaturesRequest extends TradeTa
             processModel.getTradePeer().setWarningTxSellerSignature(request.getSellersWarningTxSellerSignature());
             processModel.setRedirectTxSellerSignature(request.getBuyersRedirectTxSellerSignature());
             processModel.getTradePeer().setRedirectTxSellerSignature(request.getSellersRedirectTxSellerSignature());
+
+            // Re-sign the prepared deposit tx, to hide the s-component of the peer's signature for our redirect tx in
+            // our first input witness. (The r-component was already hidden in our signature for the peer's warning tx.)
+            Transaction preparedDepositTx = processModel.getBtcWalletService().getTxFromSerializedTx(processModel.getPreparedDepositTx());
+            processModel.getTradeWalletService().makerResignsDepositTxWithHiddenScalar(
+                    preparedDepositTx,
+                    checkNotNull(processModel.getRawTransactionInputs()).get(0),
+                    ECKey.ECDSASignature.decodeFromDER(request.getBuyersRedirectTxSellerSignature()).s,
+                    0);
+            processModel.setPreparedDepositTx(preparedDepositTx.bitcoinSerialize());
 
             // TODO: takerFeeTxTd:
             // When we receive that message the taker has published the taker fee, so we apply it to the trade.
