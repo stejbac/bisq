@@ -41,8 +41,10 @@ public class HexStringValidator extends InputValidator {
         if (!validationResult.isValid)
             return validationResult;
 
+        if (minLength == maxLength && input.length() != minLength)
+            return new ValidationResult(false, Res.get("validation.fixedLength", this.minLength));
         if (input.length() > maxLength || input.length() < minLength)
-            new ValidationResult(false, Res.get("validation.length", minLength, maxLength));
+            return new ValidationResult(false, Res.get("validation.length", minLength, maxLength));
 
         try {
             Utilities.decodeFromHex(input);

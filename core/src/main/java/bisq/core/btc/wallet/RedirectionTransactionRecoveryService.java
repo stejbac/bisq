@@ -17,11 +17,14 @@
 
 package bisq.core.btc.wallet;
 
+import bisq.core.btc.exceptions.RedirectTxRecoveryException;
 import bisq.core.btc.exceptions.TransactionVerificationException;
 import bisq.core.crypto.LowRSigningKey;
 import bisq.core.dao.burningman.DelayedPayoutTxReceiverService;
+import bisq.core.dao.burningman.DelayedPayoutTxReceiverService.ReceiverFlag;
 import bisq.core.trade.protocol.bisq_v5.model.StagedPayoutTxParameters;
 
+import bisq.common.app.Version;
 import bisq.common.util.Tuple2;
 
 import org.bitcoinj.core.Address;
@@ -43,12 +46,15 @@ import org.bitcoinj.params.RegTestParams;
 import org.bitcoinj.script.Script;
 import org.bitcoinj.script.ScriptBuilder;
 import org.bitcoinj.script.ScriptChunk;
+import org.bitcoinj.script.ScriptException;
 
 import javax.inject.Inject;
 import javax.inject.Singleton;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.BoundType;
 import com.google.common.collect.ImmutableSetMultimap;
+import com.google.common.collect.Range;
 import com.google.common.collect.SetMultimap;
 
 import org.bouncycastle.crypto.params.KeyParameter;
@@ -56,7 +62,6 @@ import org.bouncycastle.math.ec.ECPoint;
 
 import java.math.BigInteger;
 
-import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -95,15 +100,14 @@ public class RedirectionTransactionRecoveryService {
     public Transaction recoverRedirectTx(Sha256Hash depositTxId,
                                          Transaction peersWarningTx,
                                          @Nullable KeyParameter aesKey)
-            throws SignatureDecodeException, TransactionVerificationException {
+            throws RedirectTxRecoveryException {
 
-        // TODO: Throw something more useful & specific here...
         Transaction depositTx = Optional.ofNullable(btcWalletService.getTransaction(depositTxId))
-                .orElseThrow();
+                .orElseThrow(() -> new RedirectTxRecoveryException("Could not find depositTx in our wallet"));
         Tuple2<Integer, DeterministicKey> myDepositInputIndexAndKey = findMyDepositInputIndexAndKey(depositTx)
-                .orElseThrow();
+                .orElseThrow(() -> new RedirectTxRecoveryException("Invalid depositTx: missing input from our wallet"));
         DeterministicKey myMultiSigKeyPair = findMyMultiSigKeyPair(peersWarningTx.getInput(0))
-                .orElseThrow();
+                .orElseThrow(() -> new RedirectTxRecoveryException("Invalid peersWarningTx: missing multisig key from our wallet"));
 
         int myDepositInputIndex = myDepositInputIndexAndKey.first;
         boolean amBuyer = myDepositInputIndex == 0;
@@ -122,15 +126,19 @@ public class RedirectionTransactionRecoveryService {
                 .flatMap(tx -> matcher.getMatchingSignatures(redirectTxSigHash(peersWarningTx, tx, redeemScript))
                         .map(signature -> new Tuple2<>(tx, signature)))
                 .findFirst()
-                .orElseThrow();
+                .orElseThrow(() -> new RedirectTxRecoveryException("Unable to find redirectTx matching any peer signature candidate"));
 
         Transaction redirectTx = redirectTxAndPeerSignature.first;
         Sha256Hash sigHash = redirectTxSigHash(peersWarningTx, redirectTx, redeemScript);
         ECKey.ECDSASignature mySignature = LowRSigningKey.from(myMultiSigKeyPair).sign(sigHash, aesKey);
         ECKey.ECDSASignature buyerSignature = amBuyer ? mySignature : redirectTxAndPeerSignature.second;
         ECKey.ECDSASignature sellerSignature = amBuyer ? redirectTxAndPeerSignature.second : mySignature;
-        return redirectionTransactionFactory.finalizeRedirectionTransaction(peersWarningTx.getOutput(0), redirectTx,
-                redeemScript, buyerSignature, sellerSignature);
+        try {
+            return redirectionTransactionFactory.finalizeRedirectionTransaction(peersWarningTx.getOutput(0), redirectTx,
+                    redeemScript, buyerSignature, sellerSignature);
+        } catch (TransactionVerificationException | ScriptException | IllegalArgumentException e) {
+            throw new RedirectTxRecoveryException("Recovered redirectTx failed to verify", e);
+        }
     }
 
     private Optional<Tuple2<Integer, DeterministicKey>> findMyDepositInputIndexAndKey(Transaction depositTx) {
@@ -194,8 +202,13 @@ public class RedirectionTransactionRecoveryService {
 
     private Stream<Transaction> unsignedRedirectTxTemplates(TransactionOutput depositTxOutput,
                                                             Transaction peersWarningTx) {
-        return lockTimeDelaysPlusErrorsToTry()
-                .mapToObj(delay -> unsignedRedirectTxTemplate(depositTxOutput, peersWarningTx, delay));
+        return receiverFlagSetsToTry()
+                .flatMap(flags -> lockTimeDelaysPlusErrorsToTry()
+                        .mapToObj(delay -> unsignedRedirectTxTemplate(depositTxOutput, peersWarningTx, flags, delay)));
+    }
+
+    private Stream<Set<ReceiverFlag>> receiverFlagSetsToTry() {
+        return ReceiverFlag.flagsActivatedBy(Range.downTo(Version.PROTOCOL_5_ACTIVATION_DATE, BoundType.OPEN)).stream();
     }
 
     private IntStream lockTimeDelaysPlusErrorsToTry() {
@@ -206,10 +219,9 @@ public class RedirectionTransactionRecoveryService {
 
     private Transaction unsignedRedirectTxTemplate(TransactionOutput depositTxOutput,
                                                    Transaction peersWarningTx,
+                                                   Set<ReceiverFlag> receiverFlags,
                                                    int lockTimeDelayPlusError) {
-        long warningTxFee = depositTxOutput.getValue().value -
-                peersWarningTx.getOutput(0).getValue().value -
-                peersWarningTx.getOutput(1).getValue().value;
+        long warningTxFee = depositTxOutput.getValue().value - peersWarningTx.getOutputSum().value;
         long depositTxFee = StagedPayoutTxParameters.recoverDepositTxFeeRate(warningTxFee) * 278;
         long inputAmount = peersWarningTx.getOutput(0).getValue().value;
         long inputAmountMinusFeeBumpAmount = inputAmount - StagedPayoutTxParameters.REDIRECT_TX_FEE_BUMP_OUTPUT_VALUE;
@@ -221,7 +233,7 @@ public class RedirectionTransactionRecoveryService {
                 inputAmountMinusFeeBumpAmount,
                 depositTxFee,
                 StagedPayoutTxParameters.REDIRECT_TX_MIN_WEIGHT,
-                DelayedPayoutTxReceiverService.ReceiverFlag.flagsActivatedBy(new Date())); // FIXME: This will break if we add any more flags.
+                receiverFlags);
 
         String feeBumpAddress = SegwitAddress.fromHash(params, new byte[20]).toString();
         var feeBumpOutputAmountAndAddress = new Tuple2<>(StagedPayoutTxParameters.REDIRECT_TX_FEE_BUMP_OUTPUT_VALUE, feeBumpAddress);
@@ -260,24 +272,34 @@ public class RedirectionTransactionRecoveryService {
                                                                      DeterministicKey myDepositInputKeyPair,
                                                                      DeterministicKey myMultiSigKeyPair,
                                                                      @Nullable KeyParameter aesKey)
-            throws SignatureDecodeException {
+            throws RedirectTxRecoveryException {
 
         // TODO: We can do a bit more validation of the witness stacks against the supplied args here...
         Script scriptCode = ScriptBuilder.createP2PKHOutputScript(myDepositInputKeyPair);
         Sha256Hash depositSigHash = depositTx.hashForWitnessSignature(myDepositInputIndex, scriptCode, myDepositInputValue,
                 Transaction.SigHash.ALL, false);
-        TransactionSignature depositSignature = TransactionSignature.decodeFromBitcoin(
-                depositTx.getInput(myDepositInputIndex).getWitness().getPush(0), true, true);
-        checkArgument(myDepositInputKeyPair.verify(depositSigHash, depositSignature));
+        TransactionSignature depositSignature;
+        try {
+            depositSignature = TransactionSignature.decodeFromBitcoin(
+                    depositTx.getInput(myDepositInputIndex).getWitness().getPush(0), true, true);
+            checkArgument(myDepositInputKeyPair.verify(depositSigHash, depositSignature));
+        } catch (SignatureDecodeException | IllegalArgumentException e) {
+            throw new RedirectTxRecoveryException("Invalid depositTx: could not extract signature for our input", e);
+        }
 
         boolean amBuyer = myDepositInputIndex == 0;
         Script redeemScript = new Script(peersWarningTx.getInput(0).getWitness().getPush(3));
         Coin warningTxInputValue = depositTx.getOutput(0).getValue();
         Sha256Hash warningSigHash = peersWarningTx.hashForWitnessSignature(0, redeemScript, warningTxInputValue,
                 Transaction.SigHash.ALL, false);
-        TransactionSignature myWarningSignature = TransactionSignature.decodeFromBitcoin(
-                peersWarningTx.getInput(0).getWitness().getPush(amBuyer ? 2 : 1), true, true);
-        checkArgument(myMultiSigKeyPair.verify(warningSigHash, myWarningSignature));
+        TransactionSignature myWarningSignature;
+        try {
+            myWarningSignature = TransactionSignature.decodeFromBitcoin(
+                    peersWarningTx.getInput(0).getWitness().getPush(amBuyer ? 2 : 1), true, true);
+            checkArgument(myMultiSigKeyPair.verify(warningSigHash, myWarningSignature));
+        } catch (SignatureDecodeException | IllegalArgumentException e) {
+            throw new RedirectTxRecoveryException("Invalid peersWarningTx: could not extract our signature", e);
+        }
 
         return recoveredSignatureCandidates(
                 LowRSigningKey.from(myMultiSigKeyPair),

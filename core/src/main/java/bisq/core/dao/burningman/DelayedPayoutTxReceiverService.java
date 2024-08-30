@@ -36,12 +36,16 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.BoundType;
+import com.google.common.collect.Range;
 
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.EnumSet;
 import java.util.GregorianCalendar;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -140,6 +144,27 @@ public class DelayedPayoutTxReceiverService implements DaoStateListener {
             Set<ReceiverFlag> flags = EnumSet.allOf(ReceiverFlag.class);
             flags.removeIf(flag -> !date.after(flag.activationDate));
             return flags;
+        }
+
+        public static Set<Set<ReceiverFlag>> flagsActivatedBy(Range<Date> dateRange) {
+            Set<Set<ReceiverFlag>> flagsSet = new LinkedHashSet<>();
+            Date[] activationDates = Arrays.stream(values())
+                    .map(f -> f.activationDate)
+                    .toArray(Date[]::new);
+            Arrays.sort(activationDates, Comparator.naturalOrder());
+            Date lastDate = null;
+            for (Date date : activationDates) {
+                Range<Date> segment = lastDate != null ? Range.openClosed(lastDate, date) : Range.upTo(date, BoundType.CLOSED);
+                if (dateRange.isConnected(segment) && !dateRange.intersection(segment).isEmpty()) {
+                    flagsSet.add(flagsActivatedBy(date));
+                }
+                lastDate = date;
+            }
+            Range<Date> lastSegment = lastDate != null ? Range.downTo(lastDate, BoundType.OPEN) : dateRange;
+            if (dateRange.isConnected(lastSegment) && !dateRange.intersection(lastSegment).isEmpty()) {
+                flagsSet.add(EnumSet.allOf(ReceiverFlag.class));
+            }
+            return flagsSet;
         }
     }
 

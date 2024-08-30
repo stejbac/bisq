@@ -235,7 +235,7 @@ public class RedirectionTransactionRecoveryServiceTest {
         }
 
         @Test
-        public void testRecoverRedirectTx_amBuyer() throws Exception {
+        public void testRecoverRedirectTx_amBuyer() {
             setUpWalletServiceStubs(BUYERS_DEPOSIT_INPUT_KEY_PAIR, BUYERS_MULTISIG_KEY_PAIR);
 
             var redirectTx = redirectionTransactionRecoveryService.recoverRedirectTx(DEPOSIT_TX.getTxId(),
@@ -245,7 +245,7 @@ public class RedirectionTransactionRecoveryServiceTest {
         }
 
         @Test
-        public void testRecoverRedirectTx_amSeller() throws Exception {
+        public void testRecoverRedirectTx_amSeller() {
             setUpWalletServiceStubs(SELLERS_DEPOSIT_INPUT_KEY_PAIR, SELLERS_MULTISIG_KEY_PAIR);
 
             var redirectTx = redirectionTransactionRecoveryService.recoverRedirectTx(DEPOSIT_TX.getTxId(),
